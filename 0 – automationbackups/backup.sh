@@ -1,37 +1,55 @@
 #!/bin/bash
-DB_NAME="your_db_name"
-DB_USER="your_db_user"
-BACKUP_DIR="/home/user/backups"
-S3_BUCKET="s3://your-bucket-name/database"
-RETENTION_DAYS=14 
+set -e
+set -o pipefail
 
-TIMESTAMP=$(date +"%Y-%m-%d_%H-%M")
-FILENAME="${DB_NAME}_${TIMESTAMP}.sql.gz"
-FILEPATH="${BACKUP_DIR}/${FILENAME}"
+DB="my_database"
+USER="postgres"
+DIR="/backups"
+S3="s3://my-backup-bucket/db/"
+DAYS=14
 
-mkdir -p "$BACKUP_DIR"
+DATE=$(date +"%Y%m%d_%H%M")
+FILE="$DIR/$DB-$DATE.sql.gz"
+TEST_DB="test_restore"
 
-echo "[$TIMESTAMP] Dump creation for $DB_NAME"
+mkdir -p "$DIR"
 
-pg_dump -U "$DB_USER" "$DB_NAME" | gzip > "$FILEPATH"
-
-if [ $? -eq 0 ]; then
-    echo "Dump successfuly created: $FILENAME"
+echo "Starting backup..."
+if pg_dump -U "$USER" "$DB" | gzip > "$FILE"; then
+  echo "Backup done: $FILE"
 else
-    echo "Dump failed"
+  echo "Backup failed!"
+  rm -f "$FILE"
+  exit 1
+fi
+
+echo "Testing restore..."
+psql -U "$USER" -c "DROP DATABASE IF EXISTS $TEST_DB;" > /dev/null 2>&1
+psql -U "$USER" -c "CREATE DATABASE $TEST_DB;" > /dev/null 2>&1
+
+# Check if restore is successful
+if gunzip -c "$FILE" | psql -U "$USER" -d "$TEST_DB" > /dev/null 2>&1; then
+  echo "Restore OK"
+  
+  # Clean up test database
+  psql -U "$USER" -c "DROP DATABASE $TEST_DB;" > /dev/null 2>&1
+  
+  #Upload to S3
+  echo "Uploading to S3..."
+  if aws s3 cp "$FILE" "$S3"; then
+    echo "Uploaded to S3"
+    
+    find "$DIR" -name "*.sql.gz" -mtime +"$DAYS" -exec rm {} \;
+    echo "Cleaned old backups"
+  else
+    echo "S3 upload failed! Old backups were kept for safety."
     exit 1
-fi
-
-echo "Sending to S3"
-aws s3 cp "$FILEPATH" "$S3_BUCKET/"
-
-if [ $? -eq 0 ]; then
-    echo "Successfuly sent to S3"
+  fi
+  
 else
-    echo "Sending to S3 Failed"
+  echo "Restore failed! Deleting corrupted backup."
+  
+  psql -U "$USER" -c "DROP DATABASE IF EXISTS $TEST_DB;" > /dev/null 2>&1
+  rm -f "$FILE"
+  exit 1
 fi
-
-echo "Cleaning backups older than $RETENTION_DAYS days"
-find "$BACKUP_DIR" -type f -name "*.sql.gz" -mtime +$RETENTION_DAYS -exec rm {} \;
-
-echo "Finished!"
