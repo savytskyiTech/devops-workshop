@@ -1,6 +1,10 @@
 #!/bin/bash
-
 set -euo pipefail
+
+if [[ "$EUID" -ne 0 ]]; then
+  echo "Please run this script with sudo."
+  exit 1
+fi
 
 GRUB_CFG_PATH="/boot/grub/grub.cfg"
 
@@ -24,7 +28,8 @@ log_success "line found: $WINDOWS_ENTRY"
 
 echo "Reboot to Windows"
 if [ -z "$WINDOWS_ENTRY" ]; then
-echo "Windows boot manager not found in GRUB"
-exit 1
+  echo "Windows boot manager not found in GRUB"
+  exit 1
+fi
 sudo grub-reboot "$WINDOWS_ENTRY"
 sudo reboot
