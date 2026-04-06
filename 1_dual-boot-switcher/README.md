@@ -1,5 +1,4 @@
 # Dual-Boot Switcher 
-This repository contains a set of scripts for quick and automated rebooting between Windows and Ubuntu operating systems in a Dual-Boot configuration.
 Use Case: This solves a common home lab problem where you primarily use Linux but occasionally need to quickly switch to Windows for university assignments or specific software.
 
 # Prerequisites
